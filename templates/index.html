@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Корова 006</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+
+<body>
+
+    {% if page == "setup" %}
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <!--  SETUP SCREEN                                                         -->
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <div class="container setup-container">
+        <h1>🐄 Корова 006</h1>
+        <p class="subtitle">6 Nimmt! — Local Multiplayer</p>
+
+        <form action="/new" method="post" id="setup-form">
+            <label for="num_players">Number of players</label>
+            <select name="num_players" id="num_players" onchange="updatePlayerFields()">
+                {% for n in range(2, 11) %}
+                <option value="{{ n }}">{{ n }}</option>
+                {% endfor %}
+            </select>
+
+            <div id="player-names">
+                <div class="player-name-row">
+                    <label>Player 1</label>
+                    <input type="text" name="player_0" placeholder="Player 1" maxlength="20">
+                </div>
+                <div class="player-name-row">
+                    <label>Player 2</label>
+                    <input type="text" name="player_1" placeholder="Player 2" maxlength="20">
+                </div>
+            </div>
+
+            <button type="submit" class="btn btn-primary">Start Game</button>
+        </form>
+    </div>
+
+    <script>
+        function updatePlayerFields() {
+            const n = parseInt(document.getElementById("num_players").value);
+            const container = document.getElementById("player-names");
+            container.innerHTML = "";
+            for (let i = 0; i < n; i++) {
+                const div = document.createElement("div");
+                div.className = "player-name-row";
+                div.innerHTML = `
+            <label>Player ${i + 1}</label>
+            <input type="text" name="player_${i}" placeholder="Player ${i + 1}" maxlength="20">
+        `;
+                container.appendChild(div);
+            }
+        }
+    </script>
+
+    {% elif page == "play" %}
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <!--  GAME SCREEN                                                          -->
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <div class="container game-container">
+        <header class="game-header">
+            <h1>🐄 Корова 006</h1>
+            <div class="round-info">
+                {% if gs.phase != "game_over" %}
+                Round {{ gs.round_num }} / 10
+                {% else %}
+                Game Over
+                {% endif %}
+            </div>
+            <form action="/restart" method="post" class="restart-form">
+                <button type="submit" class="btn btn-small btn-danger">New Game</button>
+            </form>
+        </header>
+
+        <!-- ── Phase banner ───────────────────────────────────────────────── -->
+        {% if gs.phase == "pick" %}
+        <div class="phase-banner phase-pick">
+            All players: pick a card from your hand (click "Show Hand").
+        </div>
+        {% elif gs.phase == "choose_row" %}
+        <div class="phase-banner phase-choose">
+            {{ gs.players[gs.waiting_player].name }} must pick a row to take!
+            (Card {{ gs.waiting_card }} is smaller than all row endings.)
+        </div>
+        {% elif gs.phase == "game_over" %}
+        <div class="phase-banner phase-over">
+            🏆 {{ rankings[0][1] }} wins with {{ rankings[0][2] }} pts!
+        </div>
+        {% endif %}
+
+        <!-- ── Board ──────────────────────────────────────────────────────── -->
+        <section class="board-section">
+            <h2>Board</h2>
+            <div class="board">
+                {% for row in gs.board %}
+                <div class="board-row">
+                    <span class="row-label">Row {{ loop.index }}</span>
+                    <div class="row-cards">
+                        {% for card in row %}
+                        <div class="card" data-pts="{{ points[card] }}">
+                            <span class="card-number">{{ card }}</span>
+                            <span class="card-points">{{ points[card] }}pt</span>
+                        </div>
+                        {% endfor %}
+                        {% for _ in range(max_cols - row|length) %}
+                        <div class="card card-empty">
+                            <span class="card-number">·</span>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    <span class="row-pts">Σ {{ row|length }} cards</span>
+
+                    {% if gs.phase == "choose_row" %}
+                    <form action="/choose_row" method="post" class="row-pick-form">
+                        <input type="hidden" name="row_idx" value="{{ loop.index0 }}">
+                        <button type="submit" class="btn btn-small btn-warning">Take this row</button>
+                    </form>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+        </section>
+
+        <!-- ── Scoreboard ─────────────────────────────────────────────────── -->
+        <section class="scores-section">
+            <h2>Scores <span class="hint">(lower is better)</span></h2>
+            <div class="scoreboard">
+                {% for p in gs.players %}
+                <div
+                    class="score-card {% if gs.phase == 'game_over' and rankings[0][0] == loop.index0 %}winner{% endif %}">
+                    <span class="score-name">{{ p.name }}</span>
+                    <span class="score-value">{{ p.score }} pts</span>
+                    {% if loop.index0 in submitted %}
+                    <span class="score-badge badge-done">✓ played</span>
+                    {% elif gs.phase == "pick" %}
+                    <span class="score-badge badge-waiting">waiting…</span>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+        </section>
+
+        <!-- ── Player hands ───────────────────────────────────────────────── -->
+        {% if gs.phase == "pick" %}
+        <section class="hands-section">
+            <h2>Player Hands</h2>
+            {% for p in gs.players %}
+            {% set p_idx = loop.index0 %}
+            <div class="hand-block" id="hand-block-{{ p_idx }}">
+                <div class="hand-header">
+                    <span class="hand-name">{{ p.name }}</span>
+                    {% if p_idx in submitted %}
+                    <span class="badge-done">Card submitted ✓</span>
+                    {% else %}
+                    <button type="button" class="btn btn-small btn-toggle" onclick="toggleHand({{ p_idx }})"
+                        id="toggle-btn-{{ p_idx }}">
+                        👁 Show Hand
+                    </button>
+                    {% endif %}
+                </div>
+                <div class="hand-cards" id="hand-cards-{{ p_idx }}" style="display:none;">
+                    {% if p_idx not in submitted %}
+                    <form action="/submit_card" method="post" class="card-pick-form">
+                        <input type="hidden" name="player_idx" value="{{ p_idx }}">
+                        <div class="cards-row">
+                            {% for card in p.hand %}
+                            <button type="submit" name="card" value="{{ card }}" class="card card-hand">
+                                <span class="card-number">{{ card }}</span>
+                                <span class="card-points">{{ points[card] }}pt</span>
+                            </button>
+                            {% endfor %}
+                        </div>
+                    </form>
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        </section>
+        {% endif %}
+
+        <!-- ── Game Log ───────────────────────────────────────────────────── -->
+        <section class="log-section">
+            <h2>
+                Game Log
+                <button type="button" class="btn btn-small btn-toggle" onclick="toggleLog()">Show/Hide</button>
+            </h2>
+            <div class="game-log" id="game-log" style="display:none;">
+                {% for entry in gs.game_log | reverse %}
+                <div class="log-entry">{{ entry }}</div>
+                {% endfor %}
+            </div>
+        </section>
+
+        <!-- ── Final rankings ─────────────────────────────────────────────── -->
+        {% if gs.phase == "game_over" %}
+        <section class="rankings-section">
+            <h2>Final Rankings</h2>
+            <ol class="rankings-list">
+                {% for idx, name, score in rankings %}
+                <li class="{% if loop.index == 1 %}rank-winner{% elif loop.last %}rank-loser{% endif %}">
+                    <span class="rank-name">{{ name }}</span>
+                    <span class="rank-score">{{ score }} pts</span>
+                </li>
+                {% endfor %}
+            </ol>
+            <form action="/restart" method="post">
+                <button type="submit" class="btn btn-primary">Play Again</button>
+            </form>
+        </section>
+        {% endif %}
+    </div>
+
+    <script>
+        function toggleHand(idx) {
+            const el = document.getElementById("hand-cards-" + idx);
+            const btn = document.getElementById("toggle-btn-" + idx);
+            if (el.style.display === "none") {
+                // Hide all other hands first
+                document.querySelectorAll(".hand-cards").forEach(h => h.style.display = "none");
+                document.querySelectorAll(".btn-toggle").forEach(b => {
+                    if (b.id && b.id.startsWith("toggle-btn-")) b.textContent = "👁 Show Hand";
+                });
+                el.style.display = "flex";
+                btn.textContent = "🙈 Hide Hand";
+            } else {
+                el.style.display = "none";
+                btn.textContent = "👁 Show Hand";
+            }
+        }
+
+        function toggleLog() {
+            const el = document.getElementById("game-log");
+            el.style.display = el.style.display === "none" ? "block" : "none";
+        }
+    </script>
+    {% endif %}
+
+</body>
+
+</html>

@@ -33,6 +33,8 @@ def _gs_to_dict(gs: g.GameState) -> dict:
         "waiting_player": gs.waiting_player,
         "waiting_card": gs.waiting_card,
         "game_log": gs.game_log[-50:],  # keep last 50 entries
+        "ai_difficulty": gs.ai_difficulty,
+        "ai_players": gs.ai_players,
     }
 
 
@@ -52,6 +54,8 @@ def _dict_to_gs(d: dict) -> g.GameState:
         waiting_player=d["waiting_player"],
         waiting_card=d["waiting_card"],
         game_log=d["game_log"],
+        ai_difficulty=d.get("ai_difficulty"),
+        ai_players=d.get("ai_players", []),
     )
     return gs
 
@@ -72,17 +76,41 @@ def _load() -> g.GameState | None:
 
 @app.route("/", methods=["GET"])
 def index():
-    return render_template("index.html", page="setup")
+    return render_template("index.jinja-html", page="setup")
 
 
 @app.route("/new", methods=["POST"])
 def new_game():
     num = int(request.form.get("num_players", 2))
-    names = []
-    for i in range(num):
-        name = request.form.get(f"player_{i}", "").strip()
-        names.append(name if name else f"Player {i + 1}")
-    gs = g.new_game(num, names)
+    ai_difficulty = request.form.get("ai_difficulty")  # None when > 1 player
+
+    if num == 1:
+        # Single-player vs AI
+        human_name = request.form.get("player_0", "").strip()
+        if not human_name:
+            return render_template(
+                "index.jinja-html",
+                page="setup",
+                error="All players must have a name!",
+            )
+        diff_label = (ai_difficulty or "medium").capitalize()
+        bot_name = f"\U0001f916 Bot ({diff_label})"
+        gs = g.new_game(2, [human_name, bot_name])
+        gs.ai_difficulty = ai_difficulty or "medium"
+        gs.ai_players = [1]
+    else:
+        names = []
+        for i in range(num):
+            name = request.form.get(f"player_{i}", "").strip()
+            if not name:
+                return render_template(
+                    "index.jinja-html",
+                    page="setup",
+                    error="All players must have a name!",
+                )
+            names.append(name)
+        gs = g.new_game(num, names)
+
     _save(gs)
     return redirect(url_for("play"))
 
@@ -93,11 +121,16 @@ def play():
     if gs is None:
         return redirect(url_for("index"))
 
+    # Auto-play any pending AI actions
+    if gs.ai_players:
+        g.auto_play_ai(gs)
+        _save(gs)
+
     submitted = {p for _, p in gs.chosen_cards}
     rankings = g.get_rankings(gs) if gs.phase == "game_over" else None
 
     return render_template(
-        "index.html",
+        "index.jinja-html",
         page="play",
         gs=gs,
         submitted=submitted,
@@ -116,6 +149,11 @@ def submit_card():
     player_idx = int(request.form["player_idx"])
     card = int(request.form["card"])
     g.submit_card(gs, player_idx, card)
+
+    # Auto-play AI after human action
+    if gs.ai_players:
+        g.auto_play_ai(gs)
+
     _save(gs)
     return redirect(url_for("play"))
 
@@ -128,6 +166,11 @@ def choose_row():
 
     row_idx = int(request.form["row_idx"])
     g.choose_row(gs, row_idx)
+
+    # Auto-play AI after human action
+    if gs.ai_players:
+        g.auto_play_ai(gs)
+
     _save(gs)
     return redirect(url_for("play"))
 

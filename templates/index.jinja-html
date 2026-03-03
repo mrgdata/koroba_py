@@ -19,43 +19,75 @@
         <p class="subtitle">6 Nimmt! — Local Multiplayer</p>
 
         <form action="/new" method="post" id="setup-form">
+            {% if error %}
+            <div class="error-msg">{{ error }}</div>
+            {% endif %}
             <label for="num_players">Number of players</label>
             <select name="num_players" id="num_players" onchange="updatePlayerFields()">
-                {% for n in range(2, 11) %}
-                <option value="{{ n }}">{{ n }}</option>
+                {% for n in range(1, 11) %}
+                <option value="{{ n }}">{{ n }}{% if n == 1 %} (vs AI){% endif %}</option>
                 {% endfor %}
             </select>
+
+            <div id="ai-options" style="display:none;">
+                <label for="ai_difficulty">AI Difficulty</label>
+                <select name="ai_difficulty" id="ai_difficulty">
+                    <option value="easy">🟢 Easy — random play</option>
+                    <option value="medium" selected>🟡 Medium — smart heuristics</option>
+                    <option value="hard">🔴 Hard — optimal strategy</option>
+                </select>
+            </div>
 
             <div id="player-names">
                 <div class="player-name-row">
                     <label>Player 1</label>
                     <input type="text" name="player_0" placeholder="Player 1" maxlength="20">
                 </div>
-                <div class="player-name-row">
-                    <label>Player 2</label>
-                    <input type="text" name="player_1" placeholder="Player 2" maxlength="20">
-                </div>
             </div>
+
+            <div id="name-error" class="error-msg" style="display:none;">All players must have a name!</div>
 
             <button type="submit" class="btn btn-primary">Start Game</button>
         </form>
     </div>
 
     <script>
+        document.getElementById("setup-form").addEventListener("submit", function (e) {
+            const inputs = document.querySelectorAll("#player-names input[type='text']");
+            const errorEl = document.getElementById("name-error");
+            for (const input of inputs) {
+                if (!input.value.trim()) {
+                    e.preventDefault();
+                    errorEl.style.display = "block";
+                    input.focus();
+                    return;
+                }
+            }
+            errorEl.style.display = "none";
+        });
+
         function updatePlayerFields() {
             const n = parseInt(document.getElementById("num_players").value);
             const container = document.getElementById("player-names");
+            const aiOptions = document.getElementById("ai-options");
+
+            // Show AI options only when 1 player
+            aiOptions.style.display = n === 1 ? "block" : "none";
+
             container.innerHTML = "";
-            for (let i = 0; i < n; i++) {
+            const count = n === 1 ? 1 : n;
+            for (let i = 0; i < count; i++) {
                 const div = document.createElement("div");
                 div.className = "player-name-row";
                 div.innerHTML = `
             <label>Player ${i + 1}</label>
-            <input type="text" name="player_${i}" placeholder="Player ${i + 1}" maxlength="20">
+            <input type="text" name="player_${i}" placeholder="Player ${i + 1}" maxlength="20" required>
         `;
                 container.appendChild(div);
             }
         }
+        // Initialise on load
+        updatePlayerFields();
     </script>
 
     {% elif page == "play" %}
@@ -80,7 +112,11 @@
         <!-- ── Phase banner ───────────────────────────────────────────────── -->
         {% if gs.phase == "pick" %}
         <div class="phase-banner phase-pick">
+            {% if gs.ai_players %}
+            Pick a card from your hand (click "Show Hand").
+            {% else %}
             All players: pick a card from your hand (click "Show Hand").
+            {% endif %}
         </div>
         {% elif gs.phase == "choose_row" %}
         <div class="phase-banner phase-choose">
@@ -113,7 +149,9 @@
                         </div>
                         {% endfor %}
                     </div>
-                    <span class="row-pts">Σ {{ row|length }} cards</span>
+                    {% set row_total = namespace(pts=0) %}
+                    {% for c in row %}{% set row_total.pts = row_total.pts + points[c] %}{% endfor %}
+                    <span class="row-pts">Σ {{ row_total.pts }} pts</span>
 
                     {% if gs.phase == "choose_row" %}
                     <form action="/choose_row" method="post" class="row-pick-form">
@@ -135,7 +173,9 @@
                     class="score-card {% if gs.phase == 'game_over' and rankings[0][0] == loop.index0 %}winner{% endif %}">
                     <span class="score-name">{{ p.name }}</span>
                     <span class="score-value">{{ p.score }} pts</span>
-                    {% if loop.index0 in submitted %}
+                    {% if loop.index0 in gs.ai_players %}
+                    <span class="score-badge badge-ai">🤖 AI</span>
+                    {% elif loop.index0 in submitted %}
                     <span class="score-badge badge-done">✓ played</span>
                     {% elif gs.phase == "pick" %}
                     <span class="score-badge badge-waiting">waiting…</span>
@@ -151,6 +191,7 @@
             <h2>Player Hands</h2>
             {% for p in gs.players %}
             {% set p_idx = loop.index0 %}
+            {% if p_idx not in gs.ai_players %}
             <div class="hand-block" id="hand-block-{{ p_idx }}">
                 <div class="hand-header">
                     <span class="hand-name">{{ p.name }}</span>
@@ -179,6 +220,7 @@
                     {% endif %}
                 </div>
             </div>
+            {% endif %}
             {% endfor %}
         </section>
         {% endif %}

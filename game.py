@@ -68,6 +68,8 @@ class GameState:
     waiting_card: int | None = None  # the card that triggered it
     round_events: list[RoundEvent] = field(default_factory=list)
     game_log: list[str] = field(default_factory=list)
+    ai_difficulty: str | None = None  # None | "easy" | "medium" | "hard"
+    ai_players: list[int] = field(default_factory=list)  # indices of AI players
 
 
 # ── Engine functions ─────────────────────────────────────────────────────────
@@ -231,3 +233,132 @@ def get_rankings(gs: GameState) -> list[tuple[int, str, int]]:
     ranked = [(i, p.name, p.score) for i, p in enumerate(gs.players)]
     ranked.sort(key=lambda x: x[2])
     return ranked
+
+
+# ── AI logic ─────────────────────────────────────────────────────────────────
+
+
+def ai_pick_card(gs: GameState, player_idx: int) -> int:
+    """AI picks a card based on difficulty level."""
+    hand = gs.players[player_idx].hand
+    if gs.ai_difficulty == "easy":
+        return _ai_pick_easy(hand)
+    elif gs.ai_difficulty == "medium":
+        return _ai_pick_medium(gs, hand)
+    elif gs.ai_difficulty == "hard":
+        return _ai_pick_hard(gs, hand)
+    return random.choice(hand)
+
+
+def _ai_pick_easy(hand: list[int]) -> int:
+    """Easy AI: pick a random card."""
+    return random.choice(hand)
+
+
+def _ai_pick_medium(gs: GameState, hand: list[int]) -> int:
+    """Medium AI: prefer safe placements on shorter rows, avoid filling."""
+    best_card = hand[0]
+    best_score = float("inf")
+    for card in hand:
+        target = _find_target_row(gs.board, card)
+        if target is None:
+            # Card smaller than all row endings — risky
+            score = 100 + gs.points_table[card]
+        else:
+            row_len = len(gs.board[target])
+            if row_len >= MAX_COLS - 1:
+                # Would fill the row — take the penalty
+                taken_pts = sum(gs.points_table[c] for c in gs.board[target])
+                score = 50 + taken_pts
+            else:
+                # Safe: prefer shorter rows and smaller diffs
+                diff = card - gs.board[target][-1]
+                score = row_len * 5 + diff
+        if score < best_score:
+            best_score = score
+            best_card = card
+    return best_card
+
+
+def _ai_pick_hard(gs: GameState, hand: list[int]) -> int:
+    """Hard AI: optimal play — minimise expected penalty."""
+    best_card = hand[0]
+    best_score = float("inf")
+    for card in hand:
+        score = _evaluate_card_hard(gs, card)
+        if score < best_score:
+            best_score = score
+            best_card = card
+    return best_card
+
+
+def _evaluate_card_hard(gs: GameState, card: int) -> float:
+    """Score a card: lower is better (less expected penalty)."""
+    target = _find_target_row(gs.board, card)
+
+    if target is None:
+        # Must take a row — cost is the cheapest row
+        min_cost = min(sum(gs.points_table[c] for c in row) for row in gs.board)
+        return min_cost + 100  # heavy penalty for forced take
+
+    row = gs.board[target]
+    row_len = len(row)
+    diff = card - row[-1]
+    row_pts = sum(gs.points_table[c] for c in row)
+
+    if row_len >= MAX_COLS - 1:
+        # 6th card — we collect the row penalty
+        return row_pts + 50
+
+    # Heuristic components:
+    # 1) Fill risk: rows closer to 6 cards are riskier
+    fill_risk = (row_len / (MAX_COLS - 2)) ** 2
+    # 2) Points at stake in the row
+    risk_from_points = fill_risk * row_pts
+    # 3) Small diff → opponents less likely to squeeze in
+    gap_risk = min(diff, 20) * 0.3
+    # 4) Slightly favour spending low-point cards
+    card_pts = gs.points_table[card]
+
+    return risk_from_points + gap_risk - card_pts * 0.1
+
+
+def ai_choose_row(gs: GameState) -> int:
+    """AI picks which row to take."""
+    if gs.ai_difficulty == "easy":
+        return random.randint(0, MAX_ROWS - 1)
+    # Medium & Hard: take the cheapest row
+    best_row = 0
+    best_pts = float("inf")
+    for i, row in enumerate(gs.board):
+        pts = sum(gs.points_table[c] for c in row)
+        if pts < best_pts:
+            best_pts = pts
+            best_row = i
+    return best_row
+
+
+def auto_play_ai(gs: GameState) -> None:
+    """Automatically play all pending AI actions until human input is needed."""
+    safety = 0
+    while safety < 200:
+        safety += 1
+        acted = False
+
+        # AI submits cards during pick phase
+        if gs.phase == "pick":
+            for ai_idx in gs.ai_players:
+                if not any(p == ai_idx for _, p in gs.chosen_cards):
+                    card = ai_pick_card(gs, ai_idx)
+                    submit_card(gs, ai_idx, card)
+                    acted = True
+                    break  # re-check phase after each submission
+
+        # AI chooses row when it's their turn
+        elif gs.phase == "choose_row" and gs.waiting_player in gs.ai_players:
+            row_idx = ai_choose_row(gs)
+            choose_row(gs, row_idx)
+            acted = True
+
+        if not acted:
+            break

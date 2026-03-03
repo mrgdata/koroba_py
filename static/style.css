@@ -148,9 +148,32 @@ h2 {
     margin-bottom: .25rem;
 }
 
+.error-msg {
+    background: rgba(255, 82, 82, .12);
+    border: 1px solid rgba(255, 82, 82, .4);
+    color: var(--red);
+    padding: .6rem 1rem;
+    border-radius: var(--radius);
+    font-weight: 600;
+    font-size: .9rem;
+    margin-bottom: .75rem;
+}
+
 .setup-container .btn-primary {
     margin-top: 1.5rem;
     width: 100%;
+}
+
+#ai-options {
+    margin-top: 1rem;
+    padding: .75rem 1rem;
+    background: rgba(187, 134, 252, .08);
+    border: 1px solid rgba(187, 134, 252, .25);
+    border-radius: var(--radius);
+}
+
+#ai-options label {
+    margin-top: .25rem;
 }
 
 /* ── Game header ─────────────────────────────────────────────────────────── */
@@ -367,6 +390,11 @@ h2 {
 
 .badge-waiting {
     color: var(--text-muted);
+}
+
+.badge-ai {
+    color: var(--purple);
+    font-weight: 600;
 }
 
 /* ── Player hands section ────────────────────────────────────────────────── */

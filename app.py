@@ -11,9 +11,10 @@ import json
 from flask import Flask, render_template, request, redirect, url_for, session
 
 import game as g
+import os
 
 app = Flask(__name__)
-app.secret_key = "korova-006-secret-key-change-me"
+app.secret_key = os.environ.get("SECRET_KEY", "korova-006-secret-key-change-me")
 
 # ── Serialisation helpers ────────────────────────────────────────────────────
 # Flask sessions use JSON, so we convert GameState ↔ dict.

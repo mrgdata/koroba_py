@@ -8,6 +8,7 @@ Then open http://localhost:5000 in a browser.
 from __future__ import annotations
 
 import json
+import secrets
 from flask import Flask, render_template, request, redirect, url_for, session
 
 import game as g
@@ -15,6 +16,15 @@ import os
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "korova-006-secret-key-change-me")
+# ── Room storage (in-memory) ────────────────────────────────────────────────
+rooms: dict[str, dict] = {}
+
+
+def _get_player_id() -> str:
+    """Get or create a unique player ID for this browser session."""
+    if "player_id" not in session:
+        session["player_id"] = secrets.token_hex(16)
+    return session["player_id"]
 
 # ── Serialisation helpers ────────────────────────────────────────────────────
 # Flask sessions use JSON, so we convert GameState ↔ dict.
@@ -180,6 +190,268 @@ def choose_row():
 def restart():
     session.clear()
     return redirect(url_for("index"))
+
+
+# ── Online multiplayer routes ────────────────────────────────────────────────
+
+
+@app.route("/create_room", methods=["POST"])
+def create_room():
+    num_players = int(request.form.get("num_players", 2))
+    num_players = max(2, min(10, num_players))
+
+    host_name = request.form.get("host_name", "").strip()
+    if not host_name:
+        return render_template(
+            "index.jinja-html", page="setup", error="Enter your name!"
+        )
+
+    player_id = _get_player_id()
+    room_code = secrets.token_hex(3).upper()
+    while room_code in rooms:
+        room_code = secrets.token_hex(3).upper()
+
+    rooms[room_code] = {
+        "max_players": num_players,
+        "host_id": player_id,
+        "players": {player_id: {"name": host_name, "idx": 0}},
+        "player_order": [player_id],
+        "game_state": None,
+        "phase": "lobby",
+    }
+
+    return redirect(url_for("lobby", room_code=room_code))
+
+
+@app.route("/join_by_code", methods=["POST"])
+def join_by_code():
+    code = request.form.get("room_code", "").strip().upper()
+    if code not in rooms:
+        return render_template(
+            "index.jinja-html", page="setup", error="Room not found!"
+        )
+    return redirect(url_for("join_page", room_code=code))
+
+
+@app.route("/room/<room_code>")
+def join_page(room_code):
+    room_code = room_code.upper()
+    if room_code not in rooms:
+        return render_template(
+            "index.jinja-html", page="setup", error="Room not found!"
+        )
+
+    room = rooms[room_code]
+    player_id = _get_player_id()
+
+    if player_id in room["players"]:
+        if room["phase"] == "lobby":
+            return redirect(url_for("lobby", room_code=room_code))
+        return redirect(url_for("online_play", room_code=room_code))
+
+    if len(room["players"]) >= room["max_players"]:
+        return render_template(
+            "index.jinja-html", page="setup", error="Room is full!"
+        )
+
+    return render_template(
+        "index.jinja-html", page="join", room_code=room_code, room=room
+    )
+
+
+@app.route("/join_room/<room_code>", methods=["POST"])
+def join_room(room_code):
+    room_code = room_code.upper()
+    if room_code not in rooms:
+        return render_template(
+            "index.jinja-html", page="setup", error="Room not found!"
+        )
+
+    room = rooms[room_code]
+    player_id = _get_player_id()
+
+    if player_id in room["players"]:
+        return redirect(url_for("lobby", room_code=room_code))
+
+    if len(room["players"]) >= room["max_players"]:
+        return render_template(
+            "index.jinja-html", page="setup", error="Room is full!"
+        )
+
+    name = request.form.get("player_name", "").strip()
+    if not name:
+        return render_template(
+            "index.jinja-html",
+            page="join",
+            room_code=room_code,
+            room=room,
+            error="Enter your name!",
+        )
+
+    idx = len(room["player_order"])
+    room["players"][player_id] = {"name": name, "idx": idx}
+    room["player_order"].append(player_id)
+
+    return redirect(url_for("lobby", room_code=room_code))
+
+
+@app.route("/lobby/<room_code>")
+def lobby(room_code):
+    room_code = room_code.upper()
+    if room_code not in rooms:
+        return render_template(
+            "index.jinja-html", page="setup", error="Room not found!"
+        )
+
+    room = rooms[room_code]
+    player_id = _get_player_id()
+
+    if player_id not in room["players"]:
+        return redirect(url_for("join_page", room_code=room_code))
+
+    if room["phase"] == "playing":
+        return redirect(url_for("online_play", room_code=room_code))
+
+    is_host = player_id == room["host_id"]
+    return render_template(
+        "index.jinja-html",
+        page="lobby",
+        room_code=room_code,
+        room=room,
+        is_host=is_host,
+        player_id=player_id,
+    )
+
+
+@app.route("/start_room/<room_code>", methods=["POST"])
+def start_room(room_code):
+    room_code = room_code.upper()
+    if room_code not in rooms:
+        return redirect(url_for("index"))
+
+    room = rooms[room_code]
+    player_id = _get_player_id()
+    if player_id != room["host_id"]:
+        return redirect(url_for("lobby", room_code=room_code))
+
+    if len(room["players"]) < 2:
+        return redirect(url_for("lobby", room_code=room_code))
+
+    names = [room["players"][pid]["name"] for pid in room["player_order"]]
+    gs = g.new_game(len(names), names)
+    room["game_state"] = gs
+    room["phase"] = "playing"
+
+    return redirect(url_for("online_play", room_code=room_code))
+
+
+@app.route("/play/<room_code>")
+def online_play(room_code):
+    room_code = room_code.upper()
+    if room_code not in rooms:
+        return render_template(
+            "index.jinja-html", page="setup", error="Room not found!"
+        )
+
+    room = rooms[room_code]
+    player_id = _get_player_id()
+
+    if player_id not in room["players"]:
+        return redirect(url_for("join_page", room_code=room_code))
+
+    gs = room["game_state"]
+    if gs is None:
+        return redirect(url_for("lobby", room_code=room_code))
+
+    my_idx = room["players"][player_id]["idx"]
+    submitted = {p for _, p in gs.chosen_cards}
+    rankings = g.get_rankings(gs) if gs.phase == "game_over" else None
+
+    # Determine if page should auto-refresh (waiting for others)
+    waiting = False
+    if gs.phase == "pick" and my_idx in submitted:
+        waiting = True
+    elif gs.phase == "choose_row" and gs.waiting_player != my_idx:
+        waiting = True
+
+    return render_template(
+        "index.jinja-html",
+        page="online_play",
+        gs=gs,
+        submitted=submitted,
+        rankings=rankings,
+        points=gs.points_table,
+        max_cols=g.MAX_COLS,
+        room_code=room_code,
+        my_idx=my_idx,
+        is_host=player_id == room["host_id"],
+        waiting=waiting,
+    )
+
+
+@app.route("/submit_card_online/<room_code>", methods=["POST"])
+def submit_card_online(room_code):
+    room_code = room_code.upper()
+    if room_code not in rooms:
+        return redirect(url_for("index"))
+
+    room = rooms[room_code]
+    player_id = _get_player_id()
+    if player_id not in room["players"]:
+        return redirect(url_for("index"))
+
+    gs = room["game_state"]
+    if gs is None:
+        return redirect(url_for("index"))
+
+    my_idx = room["players"][player_id]["idx"]
+    card = int(request.form["card"])
+    g.submit_card(gs, my_idx, card)
+
+    return redirect(url_for("online_play", room_code=room_code))
+
+
+@app.route("/choose_row_online/<room_code>", methods=["POST"])
+def choose_row_online(room_code):
+    room_code = room_code.upper()
+    if room_code not in rooms:
+        return redirect(url_for("index"))
+
+    room = rooms[room_code]
+    player_id = _get_player_id()
+    if player_id not in room["players"]:
+        return redirect(url_for("index"))
+
+    gs = room["game_state"]
+    if gs is None:
+        return redirect(url_for("index"))
+
+    my_idx = room["players"][player_id]["idx"]
+    if gs.waiting_player != my_idx:
+        return redirect(url_for("online_play", room_code=room_code))
+
+    row_idx = int(request.form["row_idx"])
+    g.choose_row(gs, row_idx)
+
+    return redirect(url_for("online_play", room_code=room_code))
+
+
+@app.route("/restart_room/<room_code>", methods=["POST"])
+def restart_room(room_code):
+    room_code = room_code.upper()
+    if room_code not in rooms:
+        return redirect(url_for("index"))
+
+    room = rooms[room_code]
+    player_id = _get_player_id()
+    if player_id != room["host_id"]:
+        return redirect(url_for("online_play", room_code=room_code))
+
+    names = [room["players"][pid]["name"] for pid in room["player_order"]]
+    gs = g.new_game(len(names), names)
+    room["game_state"] = gs
+
+    return redirect(url_for("online_play", room_code=room_code))
 
 
 # ── Run ──────────────────────────────────────────────────────────────────────

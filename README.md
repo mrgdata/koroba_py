@@ -1,6 +1,6 @@
 # Корова 006 (6 Nimmt!)
 
-A local multiplayer implementation of the classic card game **Корова 006** (aka *6 Nimmt!*) built with Python, Flask, HTML, and CSS.
+A multiplayer implementation of the classic card game **Корова 006** (aka *6 Nimmt!*) built with Python, Flask, HTML, and CSS. Play locally on one device or online with friends via shareable room links.
 
 ## Rules
 
@@ -46,8 +46,28 @@ koroba-py/
 ## Features
 
 - **Local multiplayer** — 2 to 10 players on the same device.
+- **Online multiplayer** — create a room, share the link, and play with friends remotely.
 - **1 vs AI** — 1 player can play against AI in 3 difficulty modes -easy, medium, hard-.
 - **Show/Hide hands** — each player's hand is hidden by default to prevent peeking.
 - **Dark theme** with colour-coded cards by point value.
 - **Game log** tracking every action and points available in board and for each player.
 - **Error handling** for player names and human errors in cards placing.
+
+## Online Multiplayer
+
+1. On the home page, use **Create a Room** — choose the number of players (2–10) and enter your name.
+2. Share the room link or code with other players.
+3. Once everyone has joined the lobby, the host clicks **Start Game**.
+4. Each player sees only their own hand — no peeking possible.
+5. The page auto-refreshes while waiting for other players to act.
+
+## Deployment
+
+The app is ready for deployment on [Render](https://render.com) (free tier):
+
+```text
+Build Command:  pip install -r requirements.txt
+Start Command:  gunicorn app:app --bind 0.0.0.0:$PORT --workers 1
+```
+
+> Use `--workers 1` because online rooms are stored in-memory.

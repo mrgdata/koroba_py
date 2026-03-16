@@ -16,7 +16,7 @@
     <!-- ═══════════════════════════════════════════════════════════════════════ -->
     <div class="container setup-container">
         <h1>🐄 Корова 006</h1>
-        <p class="subtitle">6 Nimmt! — Local Multiplayer</p>
+        <p class="subtitle">6 Nimmt!</p>
 
         <form action="/new" method="post" id="setup-form">
             {% if error %}
@@ -48,6 +48,29 @@
             <div id="name-error" class="error-msg" style="display:none;">All players must have a name!</div>
 
             <button type="submit" class="btn btn-primary">Start Game</button>
+        </form>
+
+        <div class="divider"><span>or play online</span></div>
+
+        <form action="/create_room" method="post" class="online-form">
+            <h3>Create a Room</h3>
+            <label for="online_num_players">Number of players</label>
+            <select name="num_players" id="online_num_players">
+                {% for n in range(2, 11) %}
+                <option value="{{ n }}">{{ n }}</option>
+                {% endfor %}
+            </select>
+            <label for="host_name">Your name</label>
+            <input type="text" name="host_name" id="host_name" placeholder="Your name" maxlength="20" required>
+            <button type="submit" class="btn btn-primary">Create Room</button>
+        </form>
+
+        <form action="/join_by_code" method="post" class="online-form">
+            <h3>Join a Room</h3>
+            <label for="room_code_input">Room code</label>
+            <input type="text" name="room_code" id="room_code_input" placeholder="e.g. A1B2C3" maxlength="8"
+                style="text-transform: uppercase;" required>
+            <button type="submit" class="btn btn-primary">Join Room</button>
         </form>
     </div>
 
@@ -280,6 +303,255 @@
             el.style.display = el.style.display === "none" ? "block" : "none";
         }
     </script>
+
+    {% elif page == "join" %}
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <!--  JOIN ROOM                                                            -->
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <div class="container setup-container">
+        <h1>🐄 Корова 006</h1>
+        <p class="subtitle">Join Room <span class="room-code">{{ room_code }}</span></p>
+
+        {% if error %}
+        <div class="error-msg">{{ error }}</div>
+        {% endif %}
+
+        <p class="hint" style="margin-bottom:1rem;">{{ room.players|length }} / {{ room.max_players }} players joined</p>
+
+        <form action="/join_room/{{ room_code }}" method="post" style="text-align:left;">
+            <label for="player_name">Your name</label>
+            <input type="text" name="player_name" id="player_name" placeholder="Your name" maxlength="20" required>
+            <button type="submit" class="btn btn-primary" style="margin-top:1rem; width:100%;">Join</button>
+        </form>
+    </div>
+
+    {% elif page == "lobby" %}
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <!--  LOBBY                                                                -->
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <div class="container setup-container">
+        <h1>🐄 Корова 006</h1>
+        <p class="subtitle">Room: <span class="room-code">{{ room_code }}</span></p>
+
+        <div class="lobby-share">
+            <label>Share this link to invite players:</label>
+            <input type="text" id="share-link" readonly
+                value="{{ request.url_root }}room/{{ room_code }}"
+                onclick="this.select();">
+            <button type="button" class="btn btn-small btn-toggle" onclick="copyLink()">📋 Copy</button>
+        </div>
+
+        <div class="lobby-players">
+            <h3>Players ({{ room.players|length }} / {{ room.max_players }})</h3>
+            <ul class="player-list">
+                {% for pid in room.player_order %}
+                <li>
+                    {{ room.players[pid].name }}
+                    {% if pid == room.host_id %}<span class="badge-host">👑 Host</span>{% endif %}
+                </li>
+                {% endfor %}
+            </ul>
+        </div>
+
+        {% if is_host %}
+            {% if room.players|length >= 2 %}
+            <form action="/start_room/{{ room_code }}" method="post">
+                <button type="submit" class="btn btn-primary" style="margin-top:1.5rem; width:100%;">
+                    Start Game ({{ room.players|length }} players)
+                </button>
+            </form>
+            {% else %}
+            <p class="hint" style="margin-top:1.5rem;">Waiting for at least 2 players…</p>
+            {% endif %}
+        {% else %}
+        <p class="hint" style="margin-top:1.5rem;">Waiting for the host to start the game…</p>
+        {% endif %}
+    </div>
+
+    <script>
+        function copyLink() {
+            const input = document.getElementById("share-link");
+            input.select();
+            navigator.clipboard.writeText(input.value);
+        }
+        // Auto-refresh lobby every 3 seconds
+        setTimeout(() => location.reload(), 3000);
+    </script>
+
+    {% elif page == "online_play" %}
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <!--  ONLINE GAME                                                          -->
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <div class="container game-container">
+        <header class="game-header">
+            <h1>🐄 Корова 006</h1>
+            <div class="round-info">
+                {% if gs.phase != "game_over" %}
+                Round {{ gs.round_num }} / 10
+                <span class="room-badge">Room {{ room_code }}</span>
+                {% else %}
+                Game Over
+                {% endif %}
+            </div>
+            {% if is_host %}
+            <form action="/restart_room/{{ room_code }}" method="post" class="restart-form">
+                <button type="submit" class="btn btn-small btn-danger">New Game</button>
+            </form>
+            {% endif %}
+        </header>
+
+        <!-- ── Phase banner ───────────────────────────────────────────────── -->
+        {% if gs.phase == "pick" %}
+            {% if my_idx in submitted %}
+            <div class="phase-banner phase-pick">
+                Card submitted ✓ — waiting for other players…
+            </div>
+            {% else %}
+            <div class="phase-banner phase-pick">
+                Pick a card from your hand below.
+            </div>
+            {% endif %}
+        {% elif gs.phase == "choose_row" %}
+            {% if gs.waiting_player == my_idx %}
+            <div class="phase-banner phase-choose">
+                You must pick a row to take!
+                (Your card {{ gs.waiting_card }} is smaller than all row endings.)
+            </div>
+            {% else %}
+            <div class="phase-banner phase-choose">
+                {{ gs.players[gs.waiting_player].name }} is picking a row to take…
+            </div>
+            {% endif %}
+        {% elif gs.phase == "game_over" %}
+        <div class="phase-banner phase-over">
+            🏆 {{ rankings[0][1] }} wins with {{ rankings[0][2] }} pts!
+        </div>
+        {% endif %}
+
+        <!-- ── Board ──────────────────────────────────────────────────────── -->
+        <section class="board-section">
+            <h2>Board</h2>
+            <div class="board">
+                {% for row in gs.board %}
+                <div class="board-row">
+                    <span class="row-label">Row {{ loop.index }}</span>
+                    <div class="row-cards">
+                        {% for card in row %}
+                        <div class="card" data-pts="{{ points[card] }}">
+                            <span class="card-number">{{ card }}</span>
+                            <span class="card-points">{{ points[card] }}pt</span>
+                        </div>
+                        {% endfor %}
+                        {% for _ in range(max_cols - row|length) %}
+                        <div class="card card-empty">
+                            <span class="card-number">·</span>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% set row_total = namespace(pts=0) %}
+                    {% for c in row %}{% set row_total.pts = row_total.pts + points[c] %}{% endfor %}
+                    <span class="row-pts">Σ {{ row_total.pts }} pts</span>
+
+                    {% if gs.phase == "choose_row" and gs.waiting_player == my_idx %}
+                    <form action="/choose_row_online/{{ room_code }}" method="post" class="row-pick-form">
+                        <input type="hidden" name="row_idx" value="{{ loop.index0 }}">
+                        <button type="submit" class="btn btn-small btn-warning">Take this row</button>
+                    </form>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+        </section>
+
+        <!-- ── Scoreboard ─────────────────────────────────────────────────── -->
+        <section class="scores-section">
+            <h2>Scores <span class="hint">(lower is better)</span></h2>
+            <div class="scoreboard">
+                {% for p in gs.players %}
+                <div class="score-card
+                    {% if gs.phase == 'game_over' and rankings[0][0] == loop.index0 %}winner{% endif %}
+                    {% if loop.index0 == my_idx %}my-score{% endif %}">
+                    <span class="score-name">
+                        {{ p.name }}
+                        {% if loop.index0 == my_idx %}(you){% endif %}
+                    </span>
+                    <span class="score-value">{{ p.score }} pts</span>
+                    {% if loop.index0 in submitted %}
+                    <span class="score-badge badge-done">✓ played</span>
+                    {% elif gs.phase == "pick" %}
+                    <span class="score-badge badge-waiting">waiting…</span>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+        </section>
+
+        <!-- ── Your hand ──────────────────────────────────────────────────── -->
+        {% if gs.phase == "pick" and my_idx not in submitted %}
+        <section class="hands-section">
+            <h2>Your Hand</h2>
+            <div class="hand-block">
+                <div class="hand-cards" style="display:flex;">
+                    <form action="/submit_card_online/{{ room_code }}" method="post" class="card-pick-form">
+                        <div class="cards-row">
+                            {% for card in gs.players[my_idx].hand %}
+                            <button type="submit" name="card" value="{{ card }}" class="card card-hand">
+                                <span class="card-number">{{ card }}</span>
+                                <span class="card-points">{{ points[card] }}pt</span>
+                            </button>
+                            {% endfor %}
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </section>
+        {% endif %}
+
+        <!-- ── Game Log ───────────────────────────────────────────────────── -->
+        <section class="log-section">
+            <h2>
+                Game Log
+                <button type="button" class="btn btn-small btn-toggle" onclick="toggleLog()">Show/Hide</button>
+            </h2>
+            <div class="game-log" id="game-log" style="display:none;">
+                {% for entry in gs.game_log | reverse %}
+                <div class="log-entry">{{ entry }}</div>
+                {% endfor %}
+            </div>
+        </section>
+
+        <!-- ── Final rankings ─────────────────────────────────────────────── -->
+        {% if gs.phase == "game_over" %}
+        <section class="rankings-section">
+            <h2>Final Rankings</h2>
+            <ol class="rankings-list">
+                {% for idx, name, score in rankings %}
+                <li class="{% if loop.index == 1 %}rank-winner{% elif loop.last %}rank-loser{% endif %}">
+                    <span class="rank-name">{{ name }}{% if idx == my_idx %} (you){% endif %}</span>
+                    <span class="rank-score">{{ score }} pts</span>
+                </li>
+                {% endfor %}
+            </ol>
+            {% if is_host %}
+            <form action="/restart_room/{{ room_code }}" method="post">
+                <button type="submit" class="btn btn-primary">Play Again</button>
+            </form>
+            {% endif %}
+        </section>
+        {% endif %}
+    </div>
+
+    <script>
+        function toggleLog() {
+            const el = document.getElementById("game-log");
+            el.style.display = el.style.display === "none" ? "block" : "none";
+        }
+        {% if waiting %}
+        // Auto-refresh when waiting for other players
+        setTimeout(() => location.reload(), 3000);
+        {% endif %}
+    </script>
+
     {% endif %}
 
 </body>

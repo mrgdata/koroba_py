@@ -44,6 +44,7 @@ def _gs_to_dict(gs: g.GameState) -> dict:
         "waiting_player": gs.waiting_player,
         "waiting_card": gs.waiting_card,
         "game_log": gs.game_log[-50:],  # keep last 50 entries
+        "game_num": gs.game_num,
         "ai_difficulty": gs.ai_difficulty,
         "ai_players": gs.ai_players,
     }
@@ -65,6 +66,7 @@ def _dict_to_gs(d: dict) -> g.GameState:
         waiting_player=d["waiting_player"],
         waiting_card=d["waiting_card"],
         game_log=d["game_log"],
+        game_num=d.get("game_num", 1),
         ai_difficulty=d.get("ai_difficulty"),
         ai_players=d.get("ai_players", []),
     )

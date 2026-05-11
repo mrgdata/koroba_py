@@ -122,7 +122,7 @@
             <h1>🐄 Корова 006</h1>
             <div class="round-info">
                 {% if gs.phase != "game_over" %}
-                Round {{ gs.round_num }} / 10
+                Deal {{ gs.game_num }} · Round {{ gs.round_num }} / 10
                 {% else %}
                 Game Over
                 {% endif %}
@@ -387,7 +387,7 @@
             <h1>🐄 Корова 006</h1>
             <div class="round-info">
                 {% if gs.phase != "game_over" %}
-                Round {{ gs.round_num }} / 10
+                Deal {{ gs.game_num }} · Round {{ gs.round_num }} / 10
                 <span class="room-badge">Room {{ room_code }}</span>
                 {% else %}
                 Game Over

@@ -27,6 +27,7 @@ MAX_COLS = 6
 MAX_PLAYERS = 10
 CARDS_PER_PLAYER = 10
 TOTAL_CARDS = 104
+LOSING_SCORE = 60
 
 
 # ── Data classes ─────────────────────────────────────────────────────────────
@@ -68,6 +69,7 @@ class GameState:
     waiting_card: int | None = None  # the card that triggered it
     round_events: list[RoundEvent] = field(default_factory=list)
     game_log: list[str] = field(default_factory=list)
+    game_num: int = 1
     ai_difficulty: str | None = None  # None | "easy" | "medium" | "hard"
     ai_players: list[int] = field(default_factory=list)  # indices of AI players
 
@@ -222,10 +224,39 @@ def _resolve_next(gs: GameState) -> None:
     gs.round_num += 1
 
     if gs.round_num > CARDS_PER_PLAYER:
-        gs.phase = "game_over"
-        gs.game_log.append("Game over!")
+        if any(p.score >= LOSING_SCORE for p in gs.players):
+            gs.phase = "game_over"
+            gs.game_log.append("Game over! A player reached 60 points!")
+        else:
+            gs.game_log.append(
+                f"Deal {gs.game_num} finished. "
+                f"No player reached {LOSING_SCORE} pts yet — new deal!"
+            )
+            _start_new_deal(gs)
     else:
         gs.phase = "pick"
+
+
+def _start_new_deal(gs: GameState) -> None:
+    """Re-deal cards and reset board, keeping accumulated scores."""
+    gs.points_table = _generate_points()
+    deck = list(range(1, TOTAL_CARDS + 1))
+    random.shuffle(deck)
+
+    for player in gs.players:
+        player.hand = sorted(deck[:CARDS_PER_PLAYER])
+        deck = deck[CARDS_PER_PLAYER:]
+
+    starter = sorted(deck[:MAX_ROWS])
+    gs.board = [[c] for c in starter]
+
+    gs.round_num = 1
+    gs.game_num += 1
+    gs.phase = "pick"
+    gs.chosen_cards = []
+    gs.pending_resolve = []
+    gs.round_events = []
+    gs.game_log.append(f"── Deal {gs.game_num} started! ──")
 
 
 def get_rankings(gs: GameState) -> list[tuple[int, str, int]]:
